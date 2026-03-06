@@ -8,8 +8,9 @@ COPY package.json bun.lock* ./
 COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 
-# Copy shared packages if present
+# Copy shared packages and root tsconfig (needed by all builds)
 COPY packages/ ./packages/
+COPY tsconfig.base.json ./
 
 # Install all dependencies
 RUN bun install --frozen-lockfile
@@ -19,7 +20,6 @@ RUN cd packages/shared && bun run build
 
 # Copy API source
 COPY apps/api/ ./apps/api/
-COPY tsconfig.base.json* ./
 
 # Build the NestJS app
 WORKDIR /app/apps/api
@@ -37,10 +37,8 @@ COPY --from=builder /app/apps/api/package.json ./package.json
 COPY --from=builder /app/apps/api/src/db/migrations ./src/db/migrations
 COPY --from=builder /app/apps/api/drizzle.config.ts ./drizzle.config.ts
 
-# Non-root user for security
-RUN addgroup --system --gid 1001 appgroup && \
-    adduser --system --uid 1001 --ingroup appgroup appuser
-USER appuser
+# Non-root user for security (bun user is built into the image)
+USER bun
 
 EXPOSE 3001
 
