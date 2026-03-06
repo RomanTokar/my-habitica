@@ -14,6 +14,9 @@ COPY packages/ ./packages/
 # Install all dependencies
 RUN bun install --frozen-lockfile
 
+# Build shared package (API depends on it)
+RUN cd packages/shared && bun run build
+
 # Copy API source
 COPY apps/api/ ./apps/api/
 COPY tsconfig.base.json* ./
