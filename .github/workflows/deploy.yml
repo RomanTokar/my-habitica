@@ -140,11 +140,16 @@ jobs:
           PRIVATE_SUBNETS: ${{ needs.terraform.outputs.private_subnets }}
           ECS_SG: ${{ needs.terraform.outputs.ecs_sg }}
         run: |
+          NETWORK_CONFIG=$(jq -n \
+            --argjson subnets "$PRIVATE_SUBNETS" \
+            --arg sg "$ECS_SG" \
+            '{awsvpcConfiguration: {subnets: $subnets, securityGroups: [$sg], assignPublicIp: "DISABLED"}}')
+
           TASK_ARN=$(aws ecs run-task \
             --cluster "$ECS_CLUSTER" \
             --task-definition "$TASK_DEF_ARN" \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=$(echo $PRIVATE_SUBNETS | jq -r 'join(",")'),securityGroups=[$ECS_SG],assignPublicIp=DISABLED}" \
+            --network-configuration "$NETWORK_CONFIG" \
             --overrides '{"containerOverrides":[{"name":"api","command":["bunx","drizzle-kit","migrate"]}]}' \
             --query 'tasks[0].taskArn' \
             --output text)
