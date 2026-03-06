@@ -150,7 +150,7 @@ jobs:
             --task-definition "$TASK_DEF_ARN" \
             --launch-type FARGATE \
             --network-configuration "$NETWORK_CONFIG" \
-            --overrides '{"containerOverrides":[{"name":"api","command":["bunx","drizzle-kit","migrate"]}]}' \
+            --overrides '{"containerOverrides":[{"name":"api","command":["bun","run","db:migrate"]}]}' \
             --query 'tasks[0].taskArn' \
             --output text)
 
