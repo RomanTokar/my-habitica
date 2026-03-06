@@ -1,0 +1,237 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  terraform:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      ecr_repository_url: ${{ steps.tf-outputs.outputs.ecr_repository_url }}
+      ecs_cluster: ${{ steps.tf-outputs.outputs.ecs_cluster }}
+      ecs_service: ${{ steps.tf-outputs.outputs.ecs_service }}
+      task_def_family: ${{ steps.tf-outputs.outputs.task_def_family }}
+      s3_bucket: ${{ steps.tf-outputs.outputs.s3_bucket }}
+      cf_distribution_id: ${{ steps.tf-outputs.outputs.cf_distribution_id }}
+      private_subnets: ${{ steps.tf-outputs.outputs.private_subnets }}
+      ecs_sg: ${{ steps.tf-outputs.outputs.ecs_sg }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infra/terraform
+
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve \
+            -var="frontend_url=${{ secrets.FRONTEND_URL }}"
+        working-directory: infra/terraform
+
+      - name: Capture Terraform outputs
+        id: tf-outputs
+        working-directory: infra/terraform
+        run: |
+          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "ecs_cluster=$(terraform output -raw ecs_cluster_name)" >> "$GITHUB_OUTPUT"
+          echo "ecs_service=$(terraform output -raw ecs_service_name)" >> "$GITHUB_OUTPUT"
+          echo "task_def_family=$(terraform output -raw ecs_task_definition_family)" >> "$GITHUB_OUTPUT"
+          echo "s3_bucket=$(terraform output -raw s3_bucket_name)" >> "$GITHUB_OUTPUT"
+          echo "cf_distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
+          echo "private_subnets=$(terraform output -raw private_subnet_ids)" >> "$GITHUB_OUTPUT"
+          echo "ecs_sg=$(terraform output -raw ecs_security_group_id)" >> "$GITHUB_OUTPUT"
+
+  deploy-api:
+    name: Build and Deploy API
+    runs-on: ubuntu-latest
+    needs: terraform
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push API image to ECR
+        id: build-image
+        env:
+          ECR_REPOSITORY_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t $ECR_REPOSITORY_URL:$IMAGE_TAG \
+            -f apps/api/Dockerfile \
+            .
+          docker push $ECR_REPOSITORY_URL:$IMAGE_TAG
+          echo "image=$ECR_REPOSITORY_URL:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS task definition with new image
+        id: update-task-def
+        env:
+          TASK_DEF_FAMILY: ${{ needs.terraform.outputs.task_def_family }}
+          NEW_IMAGE: ${{ steps.build-image.outputs.image }}
+        run: |
+          # Fetch current task definition, swap the image, register new revision
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_FAMILY" \
+            --query 'taskDefinition' \
+            --output json)
+
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+            --arg IMAGE "$NEW_IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE
+             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_def_arn=$NEW_TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS service to use new task definition
+        env:
+          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
+          TASK_DEF_ARN: ${{ steps.update-task-def.outputs.task_def_arn }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --output table \
+            --query 'service.{status:status,runningCount:runningCount}'
+
+      - name: Run database migrations
+        env:
+          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
+          TASK_DEF_ARN: ${{ steps.update-task-def.outputs.task_def_arn }}
+          PRIVATE_SUBNETS: ${{ needs.terraform.outputs.private_subnets }}
+          ECS_SG: ${{ needs.terraform.outputs.ecs_sg }}
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "$TASK_DEF_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=$(echo $PRIVATE_SUBNETS | jq -r 'join(",")'),securityGroups=[$ECS_SG],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["bunx","drizzle-kit","migrate"]}]}' \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task ARN: $TASK_ARN"
+
+          # Wait for migration task to finish
+          aws ecs wait tasks-stopped \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$TASK_ARN"
+
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code $EXIT_CODE. Fetching logs..."
+            LOG_STREAM="api/api/$(basename $TASK_ARN)"
+            aws logs get-log-events \
+              --log-group-name "/ecs/my-habitica/api" \
+              --log-stream-name "$LOG_STREAM" \
+              --query 'events[*].message' \
+              --output text || true
+            exit 1
+          fi
+
+          echo "Migrations completed successfully."
+
+      - name: Wait for ECS service stability
+        env:
+          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+  deploy-web:
+    name: Build and Deploy Web (SPA)
+    runs-on: ubuntu-latest
+    needs: terraform
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Vite SPA
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: bun run build --filter @my-habitica/web
+
+      - name: Sync built assets to S3
+        env:
+          S3_BUCKET: ${{ needs.terraform.outputs.s3_bucket }}
+        run: |
+          aws s3 sync apps/web/dist/ s3://$S3_BUCKET/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html"
+
+          aws s3 cp apps/web/dist/index.html s3://$S3_BUCKET/index.html \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        env:
+          CF_DISTRIBUTION_ID: ${{ needs.terraform.outputs.cf_distribution_id }}
+        run: |
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$CF_DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+          echo "Invalidation ID: $INVALIDATION_ID"

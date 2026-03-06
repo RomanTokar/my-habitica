@@ -1,0 +1,20 @@
+{
+  "name": "my-habitica",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"bun run --filter @my-habitica/api dev\" \"bun run --filter @my-habitica/web dev\"",
+    "build": "bun run --filter @my-habitica/shared build && bun run --filter @my-habitica/api build && bun run --filter @my-habitica/web build",
+    "lint": "bun run --filter '*' lint",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "typescript": "^5.6.0"
+  }
+}

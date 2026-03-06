@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files - never commit secrets
+.env
+.env.local
+*.local
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+bun-debug.log*
+
+# Terraform state and working directory
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
+
+# Bootstrap local state (one-time setup, keep on disk but don't commit)
+infra/bootstrap/*.tfstate*
+infra/bootstrap/.terraform/
+infra/bootstrap/.terraform.lock.hcl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
