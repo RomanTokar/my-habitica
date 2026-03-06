@@ -8,7 +8,7 @@ COPY package.json bun.lock* ./
 COPY apps/api/package.json ./apps/api/
 
 # Copy shared packages if present
-COPY packages/ ./packages/ 2>/dev/null || true
+COPY packages/ ./packages/
 
 # Install all dependencies
 RUN bun install --frozen-lockfile
