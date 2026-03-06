@@ -6,6 +6,7 @@ WORKDIR /app
 # Copy workspace root package files
 COPY package.json bun.lock* ./
 COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
 
 # Copy shared packages if present
 COPY packages/ ./packages/
