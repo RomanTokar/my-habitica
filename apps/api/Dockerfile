@@ -1,5 +1,5 @@
 # Stage 1: builder
-FROM oven/bun:1 AS builder
+FROM oven/bun:1.3.9 AS builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ WORKDIR /app/apps/api
 RUN bun run build
 
 # Stage 2: runner
-FROM oven/bun:1-slim AS runner
+FROM oven/bun:1.3.9-slim AS runner
 
 WORKDIR /app
 
