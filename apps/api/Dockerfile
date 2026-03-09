@@ -38,6 +38,7 @@ COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 # Shared package is referenced via symlink: apps/api/node_modules/@my-habitica/shared -> ../../../../packages/shared
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.json
+COPY --from=builder /app/packages/shared/node_modules ./packages/shared/node_modules
 
 # Copy built API output under its workspace path so relative paths in package.json scripts resolve correctly
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
