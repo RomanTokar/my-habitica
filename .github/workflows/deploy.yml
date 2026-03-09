@@ -120,19 +120,6 @@ jobs:
 
           echo "task_def_arn=$NEW_TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
-      - name: Update ECS service to use new task definition
-        env:
-          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
-          TASK_DEF_ARN: ${{ steps.update-task-def.outputs.task_def_arn }}
-        run: |
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$ECS_SERVICE" \
-            --task-definition "$TASK_DEF_ARN" \
-            --output table \
-            --query 'service.{status:status,runningCount:runningCount}'
-
       - name: Run database migrations
         env:
           ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
@@ -181,6 +168,19 @@ jobs:
 
           echo "Migrations completed successfully."
 
+      - name: Update ECS service to use new task definition
+        env:
+          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
+          TASK_DEF_ARN: ${{ steps.update-task-def.outputs.task_def_arn }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --output table \
+            --query 'service.{status:status,runningCount:runningCount}'
+
       - name: Wait for ECS service stability
         env:
           ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
@@ -216,7 +216,7 @@ jobs:
       - name: Build Vite SPA
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-        run: bun run build --filter @my-habitica/web
+        run: bun run --filter @my-habitica/shared build && bun run --filter @my-habitica/web build
 
       - name: Sync built assets to S3
         env:
