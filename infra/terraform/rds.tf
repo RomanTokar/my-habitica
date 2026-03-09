@@ -72,7 +72,7 @@ resource "aws_db_instance" "postgres" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.app_name}-postgres-final-snapshot"
   delete_automated_backups  = false
-  deletion_protection       = true
+  deletion_protection       = false
 
   # Performance Insights (free tier)
   performance_insights_enabled = false
