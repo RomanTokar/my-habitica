@@ -194,9 +194,92 @@ jobs:
           ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
           ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
         run: |
-          aws ecs wait services-stable \
+          MAX_ATTEMPTS=60
+          SLEEP_SECONDS=15
+
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            SERVICE_JSON=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$ECS_SERVICE" \
+              --query 'services[0]')
+
+            ROLLOUT_STATE=$(echo "$SERVICE_JSON" | jq -r '.deployments[] | select(.status=="PRIMARY") | .rolloutState')
+            RUNNING=$(echo "$SERVICE_JSON" | jq -r '.runningCount')
+            DESIRED=$(echo "$SERVICE_JSON" | jq -r '.desiredCount')
+            PENDING=$(echo "$SERVICE_JSON" | jq -r '.pendingCount')
+            DEPLOYMENT_COUNT=$(echo "$SERVICE_JSON" | jq -r '.deployments | length')
+            LATEST_EVENT=$(echo "$SERVICE_JSON" | jq -r '.events[0].message // "none"')
+
+            echo "[$attempt/$MAX_ATTEMPTS] rolloutState=$ROLLOUT_STATE running=$RUNNING desired=$DESIRED pending=$PENDING deployments=$DEPLOYMENT_COUNT"
+            echo "  Event: $LATEST_EVENT"
+
+            if [ "$ROLLOUT_STATE" = "FAILED" ]; then
+              echo "Deployment circuit breaker triggered — rollout FAILED."
+              exit 1
+            fi
+
+            if [ "$ROLLOUT_STATE" = "COMPLETED" ] && [ "$RUNNING" = "$DESIRED" ] && [ "$DEPLOYMENT_COUNT" = "1" ]; then
+              echo "Service is stable."
+              exit 0
+            fi
+
+            sleep $SLEEP_SECONDS
+          done
+
+          echo "Timed out waiting for service stability after $((MAX_ATTEMPTS * SLEEP_SECONDS)) seconds."
+          exit 1
+
+      - name: Diagnose ECS deployment failure
+        if: failure()
+        env:
+          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
+        run: |
+          echo "=== Last 10 ECS Service Events ==="
+          aws ecs describe-services \
             --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE"
+            --services "$ECS_SERVICE" \
+            --query 'services[0].events[:10]' \
+            --output table
+
+          echo ""
+          echo "=== Stopped Tasks ==="
+          STOPPED_TASKS=$(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --service-name "$ECS_SERVICE" \
+            --desired-status STOPPED \
+            --query 'taskArns[:5]' \
+            --output text)
+
+          if [ -n "$STOPPED_TASKS" ]; then
+            aws ecs describe-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --tasks $STOPPED_TASKS \
+              --query 'tasks[*].{taskArn:taskArn,stoppedReason:stoppedReason,containers:containers[*].{name:name,exitCode:exitCode,reason:reason}}' \
+              --output json
+          else
+            echo "No stopped tasks found."
+          fi
+
+          echo ""
+          echo "=== Last 50 CloudWatch Log Lines ==="
+          LOG_STREAM=$(aws logs describe-log-streams \
+            --log-group-name "/ecs/my-habitica/api" \
+            --order-by LastEventTime \
+            --descending \
+            --query 'logStreams[0].logStreamName' \
+            --output text 2>/dev/null || true)
+
+          if [ -n "$LOG_STREAM" ] && [ "$LOG_STREAM" != "None" ]; then
+            aws logs get-log-events \
+              --log-group-name "/ecs/my-habitica/api" \
+              --log-stream-name "$LOG_STREAM" \
+              --limit 50 \
+              --query 'events[*].message' \
+              --output text || true
+          else
+            echo "No log stream found."
+          fi
 
   deploy-web:
     name: Build and Deploy Web (SPA)
