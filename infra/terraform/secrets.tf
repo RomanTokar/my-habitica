@@ -46,7 +46,7 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 resource "random_password" "db_password" {
   length           = 32
   special          = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
+  override_special = "!&*()-_=+"
 }
 
 # Composite DATABASE_URL secret for easy injection into ECS task
