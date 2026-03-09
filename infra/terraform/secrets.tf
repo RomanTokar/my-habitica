@@ -2,7 +2,7 @@
 resource "aws_secretsmanager_secret" "jwt_secret" {
   name                    = "${var.app_name}/${var.environment}/jwt-secret"
   description             = "JWT signing secret for ${var.app_name} API"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 
   tags = {
     Name = "${var.app_name}-jwt-secret"
@@ -24,7 +24,7 @@ resource "aws_secretsmanager_secret_version" "jwt_secret" {
 resource "aws_secretsmanager_secret" "db_password" {
   name                    = "${var.app_name}/${var.environment}/db-password"
   description             = "PostgreSQL master password for ${var.app_name}"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 
   tags = {
     Name = "${var.app_name}-db-password"
@@ -53,7 +53,7 @@ resource "random_password" "db_password" {
 resource "aws_secretsmanager_secret" "db_url" {
   name                    = "${var.app_name}/${var.environment}/database-url"
   description             = "Full PostgreSQL connection string for ${var.app_name} API"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 
   tags = {
     Name = "${var.app_name}-database-url"
