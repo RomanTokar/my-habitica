@@ -17,15 +17,6 @@ resource "aws_s3_bucket_public_access_block" "spa" {
   restrict_public_buckets = true
 }
 
-# Versioning for audit trail / rollback capability
-resource "aws_s3_bucket_versioning" "spa" {
-  bucket = aws_s3_bucket.spa.id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
 # Server-side encryption
 resource "aws_s3_bucket_server_side_encryption_configuration" "spa" {
   bucket = aws_s3_bucket.spa.id
