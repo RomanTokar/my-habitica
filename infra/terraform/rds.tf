@@ -68,10 +68,9 @@ resource "aws_db_instance" "postgres" {
   backup_window           = "03:00-04:00"
   maintenance_window      = "Mon:04:00-Mon:05:00"
 
-  # Snapshots — protect against accidental deletion
-  skip_final_snapshot       = false
-  final_snapshot_identifier = "${var.app_name}-postgres-final-snapshot"
-  delete_automated_backups  = false
+  # Snapshots
+  skip_final_snapshot      = true
+  delete_automated_backups = true
   deletion_protection       = false
 
   # Performance Insights (free tier)
