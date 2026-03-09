@@ -93,7 +93,7 @@ resource "aws_ecs_task_definition" "api" {
       }
 
       healthCheck = {
-        command     = ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+        command     = ["CMD-SHELL", "bun -e \"fetch('http://localhost:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
         interval    = 30
         timeout     = 5
         retries     = 3
@@ -251,6 +251,8 @@ resource "aws_ecs_service" "api" {
   # Allow rolling deployments without downtime
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
+
+  health_check_grace_period_seconds = 60
 
   network_configuration {
     subnets          = aws_subnet.private[*].id
