@@ -64,7 +64,7 @@ resource "aws_secretsmanager_secret_version" "db_url" {
   secret_id = aws_secretsmanager_secret.db_url.id
 
   # Populated after RDS is created; uses a local to compute the URL
-  secret_string = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.postgres.endpoint}/${var.db_name}"
+  secret_string = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.postgres.endpoint}/${var.db_name}?sslmode=require"
 
   depends_on = [aws_db_instance.postgres]
 }
