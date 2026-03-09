@@ -89,11 +89,19 @@ jobs:
           ECR_REPOSITORY_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build \
-            -t $ECR_REPOSITORY_URL:$IMAGE_TAG \
-            -f apps/api/Dockerfile \
-            .
-          docker push $ECR_REPOSITORY_URL:$IMAGE_TAG
+          # Extract repo name from URL (everything after the /)
+          REPO_NAME="${ECR_REPOSITORY_URL##*/}"
+
+          # Check if image with this tag already exists
+          if aws ecr describe-images --repository-name "$REPO_NAME" --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1; then
+            echo "Image $IMAGE_TAG already exists in ECR, skipping build."
+          else
+            docker build \
+              -t $ECR_REPOSITORY_URL:$IMAGE_TAG \
+              -f apps/api/Dockerfile \
+              .
+            docker push $ECR_REPOSITORY_URL:$IMAGE_TAG
+          fi
           echo "image=$ECR_REPOSITORY_URL:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Update ECS task definition with new image
