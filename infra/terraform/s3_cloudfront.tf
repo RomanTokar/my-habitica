@@ -37,6 +37,19 @@ resource "aws_cloudfront_origin_access_control" "spa" {
   signing_protocol                  = "sigv4"
 }
 
+# CloudFront Function: strip /api prefix before forwarding to ALB
+resource "aws_cloudfront_function" "api_rewrite" {
+  name    = "${var.app_name}-api-rewrite"
+  runtime = "cloudfront-js-2.0"
+  code    = <<-EOF
+    function handler(event) {
+      var request = event.request;
+      request.uri = request.uri.replace(/^\/api/, '') || '/';
+      return request;
+    }
+  EOF
+}
+
 # CloudFront Distribution
 resource "aws_cloudfront_distribution" "spa" {
   enabled             = true
@@ -49,6 +62,37 @@ resource "aws_cloudfront_distribution" "spa" {
     domain_name              = aws_s3_bucket.spa.bucket_regional_domain_name
     origin_id                = "S3-${aws_s3_bucket.spa.id}"
     origin_access_control_id = aws_cloudfront_origin_access_control.spa.id
+  }
+
+  origin {
+    domain_name = aws_lb.api.dns_name
+    origin_id   = "ALB-api"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only" # ALB only has HTTP listener
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  # Route /api/* to ALB (must come before default_cache_behavior)
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "ALB-api"
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+
+    # CachingDisabled — API responses must not be cached
+    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    # AllViewerExceptHostHeader — forwards cookies (JWT), query strings, and headers
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.api_rewrite.arn
+    }
   }
 
   default_cache_behavior {

@@ -305,8 +305,6 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build Vite SPA
-        env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: bun run --filter @my-habitica/shared build && bun run --filter @my-habitica/web build
 
       - name: Sync built assets to S3

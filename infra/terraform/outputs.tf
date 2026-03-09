@@ -1,6 +1,6 @@
 output "api_url" {
-  description = "Public URL of the API (ALB DNS name). Update to https:// once ACM certificate is configured."
-  value       = "http://${aws_lb.api.dns_name}"
+  description = "API is accessed through CloudFront at /api (e.g. https://<cloudfront-domain>/api). Direct ALB URL: http://<alb-dns>"
+  value       = "https://${aws_cloudfront_distribution.spa.domain_name}/api"
 }
 
 output "cloudfront_url" {
